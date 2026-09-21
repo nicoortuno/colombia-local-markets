@@ -1,0 +1,41 @@
+# Secrets / environment
+.env
+.env.*
+!.env.example
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.coverage
+htmlcov/
+
+# React / Node
+node_modules/
+frontend/node_modules/
+dist/
+frontend/dist/
+.vite/
+
+# Market data / databases
+data/raw/
+data/processed/
+*.parquet
+*.duckdb
+*.db
+
+# Allow public sample data
+!data/sample/
+!data/sample/*.csv
+
+# IDE / OS
+.DS_Store
+.idea/
+.vscode/
+
+# Logs
+*.log
