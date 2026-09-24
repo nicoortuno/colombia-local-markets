@@ -7,6 +7,7 @@ import type {
 
 interface TesYieldCurveProps {
   points: TesCurvePoint[];
+  currentLabel?: string;
   comparisonPoints?: TesCurvePoint[];
   comparisonLabel?: string;
   selectedSecurityId?: string | null;
@@ -32,6 +33,32 @@ function formatMaturity(
 }
 
 
+function maturityYearValue(
+  maturityDate: string,
+): number {
+  const date = new Date(
+    `${maturityDate}T00:00:00Z`,
+  );
+  const year = date.getUTCFullYear();
+  const startOfYear = Date.UTC(
+    year,
+    0,
+    1,
+  );
+  const startOfNextYear = Date.UTC(
+    year + 1,
+    0,
+    1,
+  );
+
+  return (
+    year +
+    (date.getTime() - startOfYear) /
+      (startOfNextYear - startOfYear)
+  );
+}
+
+
 function formatVolume(
   valueCopMn: number,
 ): string {
@@ -49,6 +76,7 @@ function formatVolume(
 
 export function TesYieldCurve({
   points,
+  currentLabel,
   comparisonPoints,
   comparisonLabel,
   selectedSecurityId,
@@ -61,7 +89,9 @@ export function TesYieldCurve({
     )
     .map((point) => ({
       value: [
-        point.maturity_date,
+        maturityYearValue(
+          point.maturity_date,
+        ),
         point.close_yield,
       ],
       security: point.security_id,
@@ -95,7 +125,9 @@ export function TesYieldCurve({
     )
     .map((point) => ({
       value: [
-        point.maturity_date,
+        maturityYearValue(
+          point.maturity_date,
+        ),
         point.close_yield,
       ],
       security: point.security_id,
@@ -109,6 +141,15 @@ export function TesYieldCurve({
   ].filter(
     (value): value is number => value !== null,
   );
+
+  const allMaturityYears = [
+    ...currentData.map(
+      (point) => point.value[0] as number,
+    ),
+    ...comparisonData.map(
+      (point) => point.value[0] as number,
+    ),
+  ];
 
   if (allYields.length === 0) {
     return null;
@@ -124,18 +165,28 @@ export function TesYieldCurve({
       (Math.max(...allYields) + 0.08) * 10,
     ) / 10;
 
+  const minimumMaturityYear =
+    Math.floor(
+      Math.min(...allMaturityYears) / 5,
+    ) * 5;
+
+  const maximumMaturityYear =
+    Math.ceil(
+      Math.max(...allMaturityYears) / 5,
+    ) * 5;
+
   const option = {
     animationDuration: 300,
 
     grid: {
-      top: comparisonData.length > 0 ? 34 : 22,
+      top: 34,
       right: 24,
-      bottom: 46,
+      bottom: 58,
       left: 58,
     },
 
     legend: {
-      show: comparisonData.length > 0,
+      show: true,
       top: 0,
       right: 16,
       itemWidth: 18,
@@ -188,7 +239,7 @@ export function TesYieldCurve({
             : "";
 
         const changes =
-          params.seriesName === "Current"
+          params.seriesName === (currentLabel ?? "Current")
             ? `<br/>1D: ${moveText(change1d)} &nbsp; 5D: ${moveText(change5d)}`
             : "";
 
@@ -203,8 +254,10 @@ export function TesYieldCurve({
     },
 
     xAxis: {
-      type: "time",
-      boundaryGap: false,
+      type: "value",
+      min: minimumMaturityYear,
+      max: maximumMaturityYear,
+      interval: 5,
       axisLine: {
         lineStyle: {
           color: "#C9D3DC",
@@ -216,17 +269,16 @@ export function TesYieldCurve({
       axisLabel: {
         color: "#60758A",
         fontSize: 10,
-        formatter: (value: number) => {
-          const date = new Date(value);
-          return date.toLocaleDateString(
-            "en-US",
-            {
-              month: "short",
-              year: "2-digit",
-              timeZone: "UTC",
-            },
-          );
-        },
+        formatter: (value: number) =>
+          String(Math.round(value)),
+      },
+      name: "Maturity",
+      nameLocation: "middle",
+      nameGap: 34,
+      nameTextStyle: {
+        color: "#7B8B99",
+        fontSize: 10,
+        fontWeight: 500,
       },
       splitLine: {
         show: false,
@@ -277,7 +329,7 @@ export function TesYieldCurve({
           ]
         : []),
       {
-        name: "Current",
+        name: currentLabel ?? "Current",
         type: "line",
         data: currentData,
         showSymbol: true,
@@ -300,7 +352,7 @@ export function TesYieldCurve({
       };
     }) => {
       if (
-        params.seriesName === "Current" &&
+        params.seriesName === (currentLabel ?? "Current") &&
         params.data?.security &&
         onSelectSecurity
       ) {
@@ -312,6 +364,7 @@ export function TesYieldCurve({
   return (
     <ReactECharts
       option={option}
+      notMerge={true}
       onEvents={onEvents}
       style={{
         height: "320px",

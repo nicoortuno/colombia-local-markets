@@ -12,9 +12,13 @@ import {
 import {
   useMemo,
   useState,
+  type ChangeEvent,
 } from "react";
+import { BrowserRouter, NavLink, Route, Routes, Navigate } from "react-router-dom";
 
 import { TesYieldCurve } from "./features/rates/TesYieldCurve";
+import { FxPage } from "./features/fx/FxPage";
+import { MacroPage } from "./features/macro/MacroPage";
 import { useTesCurve } from "./features/rates/useTesCurve";
 import type {
   TesCurvePoint,
@@ -162,6 +166,77 @@ function findComparisonDate(
 }
 
 
+function findClosestTenorPoint(
+  tradeDate: string,
+  points: TesCurvePoint[],
+  tenorYears: number,
+): TesCurvePoint | undefined {
+  const targetMaturity = new Date(
+    `${tradeDate}T00:00:00Z`,
+  );
+
+  targetMaturity.setUTCFullYear(
+    targetMaturity.getUTCFullYear() + tenorYears,
+  );
+
+  const targetTime = targetMaturity.getTime();
+
+  return points
+    .filter(
+      (point) => point.close_yield !== null,
+    )
+    .reduce<TesCurvePoint | undefined>(
+      (closest, point) => {
+        if (!closest) {
+          return point;
+        }
+
+        const pointDistance = Math.abs(
+          new Date(
+            `${point.maturity_date}T00:00:00Z`,
+          ).getTime() - targetTime,
+        );
+
+        const closestDistance = Math.abs(
+          new Date(
+            `${closest.maturity_date}T00:00:00Z`,
+          ).getTime() - targetTime,
+        );
+
+        return pointDistance < closestDistance
+          ? point
+          : closest;
+      },
+      undefined,
+    );
+}
+
+
+function tenorMoveBp(
+  latestPoint: TesCurvePoint | undefined,
+  selectedPoint: TesCurvePoint | undefined,
+  isHistoricalDate: boolean,
+): number | null {
+  if (!latestPoint || latestPoint.close_yield === null) {
+    return null;
+  }
+
+  if (!isHistoricalDate) {
+    return latestPoint.change_1d_bp;
+  }
+
+  if (!selectedPoint || selectedPoint.close_yield === null) {
+    return null;
+  }
+
+  return Number(
+    (
+      (latestPoint.close_yield - selectedPoint.close_yield) * 100
+    ).toFixed(1),
+  );
+}
+
+
 function MetricMove({
   value,
 }: {
@@ -273,7 +348,7 @@ function BondTable({
 }
 
 
-function App() {
+function RatesPage() {
   const [selectedDate, setSelectedDate] =
     useState<string>();
   const [selectedSecurityId, setSelectedSecurityId] =
@@ -287,8 +362,27 @@ function App() {
     isError,
   } = useTesCurve(selectedDate);
 
+  const {
+    data: latestData,
+  } = useTesCurve();
+
+  const isHistoricalDate = Boolean(
+    data && data.trade_date !== data.latest_date,
+  );
+
   const comparisonDate = useMemo(() => {
-    if (!data || !comparisonRange) {
+    if (!data) {
+      return null;
+    }
+
+    // Historical views always keep the latest SEN close on screen
+    // as the reference curve. On the latest date, a second curve
+    // appears only when the user explicitly selects a range.
+    if (data.trade_date !== data.latest_date) {
+      return data.latest_date;
+    }
+
+    if (!comparisonRange) {
       return null;
     }
 
@@ -309,15 +403,49 @@ function App() {
     Boolean(comparisonDate),
   );
 
-  const frontPoint = data?.points.find(
-    (point) => point.close_yield !== null,
+  const latestTwoYearPoint = latestData
+    ? findClosestTenorPoint(
+        latestData.trade_date,
+        latestData.points,
+        2,
+      )
+    : undefined;
+
+  const latestTenYearPoint = latestData
+    ? findClosestTenorPoint(
+        latestData.trade_date,
+        latestData.points,
+        10,
+      )
+    : undefined;
+
+  const selectedTwoYearPoint = data
+    ? findClosestTenorPoint(
+        data.trade_date,
+        data.points,
+        2,
+      )
+    : undefined;
+
+  const selectedTenYearPoint = data
+    ? findClosestTenorPoint(
+        data.trade_date,
+        data.points,
+        10,
+      )
+    : undefined;
+
+  const twoYearMove = tenorMoveBp(
+    latestTwoYearPoint,
+    selectedTwoYearPoint,
+    isHistoricalDate,
   );
 
-  const longPoint = [...(data?.points ?? [])]
-    .reverse()
-    .find(
-      (point) => point.close_yield !== null,
-    );
+  const tenYearMove = tenorMoveBp(
+    latestTenYearPoint,
+    selectedTenYearPoint,
+    isHistoricalDate,
+  );
 
   const totalVolume =
     data?.points.reduce(
@@ -386,69 +514,18 @@ function App() {
     }
   };
 
+  const handleLatestDate = () => {
+    if (!data) {
+      return;
+    }
+
+    setSelectedDate(undefined);
+    setComparisonRange(null);
+    setSelectedSecurityId(null);
+  };
+
   return (
-    <div className="app-shell">
-      <aside className="sidebar">
-        <div className="brand">
-          <div className="brand-mark">
-            LM
-          </div>
-
-          <div>
-            <div className="brand-title">
-              Local Markets
-            </div>
-            <div className="brand-subtitle">
-              Colombia
-            </div>
-          </div>
-        </div>
-
-        <nav className="nav">
-          <button
-            type="button"
-            className="nav-item active"
-          >
-            <BarChart3 size={17} />
-            Dashboard
-          </button>
-
-          <button
-            type="button"
-            className="nav-item"
-          >
-            <Landmark size={17} />
-            TES Rates
-          </button>
-
-          <button
-            type="button"
-            className="nav-item"
-          >
-            <CircleDollarSign size={17} />
-            FX
-          </button>
-
-          <button
-            type="button"
-            className="nav-item"
-          >
-            <Activity size={17} />
-            Macro
-          </button>
-        </nav>
-
-        <div className="sidebar-footer">
-          <Database size={14} />
-
-          <div>
-            <div>Banco de la República</div>
-            <span>SEN Market Data</span>
-          </div>
-        </div>
-      </aside>
-
-      <main className="workspace">
+    <>
         <header className="topbar">
           <div>
             <p className="eyebrow">
@@ -488,58 +565,62 @@ function App() {
               <div className="metric-grid">
                 <div className="metric-card">
                   <span className="metric-label">
-                    Front-End Yield
+                    2Y TES
                   </span>
 
                   <div className="metric-value-row">
                     <strong>
-                      {frontPoint?.close_yield !== null &&
-                      frontPoint?.close_yield !== undefined
-                        ? `${frontPoint.close_yield.toFixed(3)}%`
+                      {latestTwoYearPoint?.close_yield !== null &&
+                      latestTwoYearPoint?.close_yield !== undefined
+                        ? `${latestTwoYearPoint.close_yield.toFixed(3)}%`
                         : "—"}
                     </strong>
 
                     <MetricMove
-                      value={
-                        frontPoint?.change_1d_bp ?? null
-                      }
+                      value={twoYearMove}
                     />
                   </div>
 
                   <span className="metric-note">
-                    {frontPoint
-                      ? formatMaturity(
-                          frontPoint.maturity_date,
-                        )
+                    {latestTwoYearPoint
+                      ? `${formatMaturity(
+                          latestTwoYearPoint.maturity_date,
+                        )}${
+                          isHistoricalDate && data
+                            ? ` · vs ${formatDateDisplay(data.trade_date)}`
+                            : " · 1D"
+                        }`
                       : "—"}
                   </span>
                 </div>
 
                 <div className="metric-card">
                   <span className="metric-label">
-                    Long-End Yield
+                    10Y TES
                   </span>
 
                   <div className="metric-value-row">
                     <strong>
-                      {longPoint?.close_yield !== null &&
-                      longPoint?.close_yield !== undefined
-                        ? `${longPoint.close_yield.toFixed(3)}%`
+                      {latestTenYearPoint?.close_yield !== null &&
+                      latestTenYearPoint?.close_yield !== undefined
+                        ? `${latestTenYearPoint.close_yield.toFixed(3)}%`
                         : "—"}
                     </strong>
 
                     <MetricMove
-                      value={
-                        longPoint?.change_1d_bp ?? null
-                      }
+                      value={tenYearMove}
                     />
                   </div>
 
                   <span className="metric-note">
-                    {longPoint
-                      ? formatMaturity(
-                          longPoint.maturity_date,
-                        )
+                    {latestTenYearPoint
+                      ? `${formatMaturity(
+                          latestTenYearPoint.maturity_date,
+                        )}${
+                          isHistoricalDate && data
+                            ? ` · vs ${formatDateDisplay(data.trade_date)}`
+                            : " · 1D"
+                        }`
                       : "—"}
                   </span>
                 </div>
@@ -609,7 +690,7 @@ function App() {
                           setComparisonRange(null)
                         }
                       >
-                        Today
+                        None
                       </button>
 
                       {(["1W", "1M", "3M"] as const).map(
@@ -623,12 +704,15 @@ function App() {
                                 : "range-button"
                             }
                             disabled={
+                              isHistoricalDate ||
                               !comparisonAvailability[range]
                             }
                             title={
-                              comparisonAvailability[range]
-                                ? `Compare with ${comparisonAvailability[range]}`
-                                : `Not enough history for ${range}`
+                              isHistoricalDate
+                                ? "Range comparisons are anchored to the latest SEN close. Return to Latest to use them."
+                                : comparisonAvailability[range]
+                                  ? `Compare with ${comparisonAvailability[range]}`
+                                  : `Not enough history for ${range}`
                             }
                             onClick={() =>
                               setComparisonRange(range)
@@ -658,7 +742,7 @@ function App() {
                           value={data.trade_date}
                           min={data.available_dates[0]}
                           max={data.latest_date}
-                          onChange={(event) => {
+                          onChange={(event: ChangeEvent<HTMLInputElement>) => {
                             setSelectedDate(
                               event.target.value || undefined,
                             );
@@ -678,17 +762,40 @@ function App() {
                         <ChevronRight size={16} />
                       </button>
                     </div>
+
+                    <button
+                      type="button"
+                      className="latest-button"
+                      disabled={
+                        data.trade_date === data.latest_date
+                      }
+                      onClick={handleLatestDate}
+                      title="Jump to latest available SEN close"
+                    >
+                      Latest
+                    </button>
                   </div>
                 </div>
 
                 <div className="curve-chart">
                   <TesYieldCurve
                     points={data.points}
+                    currentLabel={
+                      formatDateDisplay(
+                        data.trade_date,
+                      )
+                    }
                     comparisonPoints={
-                      comparisonData?.points
+                      comparisonDate &&
+                      comparisonDate !== data.trade_date &&
+                      comparisonData?.trade_date === comparisonDate
+                        ? comparisonData.points
+                        : undefined
                     }
                     comparisonLabel={
-                      comparisonData
+                      comparisonDate &&
+                      comparisonDate !== data.trade_date &&
+                      comparisonData?.trade_date === comparisonDate
                         ? formatDateDisplay(
                             comparisonData.trade_date,
                           )
@@ -729,10 +836,64 @@ function App() {
             </>
           )}
         </section>
-      </main>
-    </div>
+    </>
   );
 }
 
+function Sidebar() {
+  return (
+    <aside className="sidebar">
+      <div className="brand">
+        <div className="brand-mark">LM</div>
+        <div>
+          <div className="brand-title">Local Markets</div>
+          <div className="brand-subtitle">Colombia</div>
+        </div>
+      </div>
+
+      <nav className="nav" aria-label="Main navigation">
+        <NavLink to="/" end className={({isActive}) => `nav-item${isActive ? " active" : ""}`}>
+          <BarChart3 size={17}/> Dashboard
+        </NavLink>
+        <NavLink to="/rates" className={({isActive}) => `nav-item${isActive ? " active" : ""}`}>
+          <Landmark size={17}/> TES Rates
+        </NavLink>
+        <NavLink to="/fx" className={({isActive}) => `nav-item${isActive ? " active" : ""}`}>
+          <CircleDollarSign size={17}/> FX
+        </NavLink>
+        <NavLink to="/macro" className={({isActive}) => `nav-item${isActive ? " active" : ""}`}>
+          <Activity size={17}/> Macro
+        </NavLink>
+      </nav>
+
+      <div className="sidebar-footer">
+        <Database size={14}/>
+        <div>
+          <div>Market data</div>
+          <span>BanRep SEN · Yahoo Finance</span>
+        </div>
+      </div>
+    </aside>
+  );
+}
+
+function App() {
+  return (
+    <BrowserRouter>
+      <div className="app-shell">
+        <Sidebar/>
+        <main className="workspace">
+          <Routes>
+            <Route path="/" element={<RatesPage/>}/>
+            <Route path="/rates" element={<RatesPage/>}/>
+            <Route path="/fx" element={<FxPage/>}/>
+            <Route path="/macro" element={<MacroPage/>}/>
+            <Route path="*" element={<Navigate to="/" replace/>}/>
+          </Routes>
+        </main>
+      </div>
+    </BrowserRouter>
+  );
+}
 
 export default App;

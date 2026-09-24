@@ -11,7 +11,12 @@ export function useTesCurve(
   enabled = true,
 ) {
   return useQuery({
-    queryKey: ["tes-curve", tradeDate ?? "latest"],
+    queryKey: [
+      "tes-curve",
+      enabled
+        ? tradeDate ?? "latest"
+        : "disabled",
+    ],
     enabled,
 
     queryFn: async () => {
